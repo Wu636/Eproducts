@@ -7,6 +7,29 @@ CONFIG_DIR = Path(__file__).resolve().parent
 LOCAL_PROVIDER_CONFIG = CONFIG_DIR / "provider_config.local.json"
 
 
+def _load_env_file(path):
+    if not path.exists():
+        return
+    for raw_line in path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.strip()
+        value = value.strip().strip('"').strip("'")
+        if key and key not in os.environ:
+            os.environ[key] = value
+
+
+for env_path in (
+    CONFIG_DIR.parent / ".env",
+    CONFIG_DIR.parent / ".env.local",
+    CONFIG_DIR / ".env",
+    CONFIG_DIR / ".env.local",
+):
+    _load_env_file(env_path)
+
+
 def _load_local_provider_config():
     if not LOCAL_PROVIDER_CONFIG.exists():
         return {}
@@ -116,6 +139,24 @@ class Settings:
         self.video_api_key = _provider_value(local_config, "video", "api_key", "XHS_VIDEO_API_KEY", "")
         self.video_model = _provider_value(local_config, "video", "model", "XHS_VIDEO_MODEL", "")
 
+        # Database/storage backend. Keep service role keys on the backend only.
+        self.storage_backend = os.getenv("XHS_STORAGE_BACKEND", "memory").strip().lower()
+        self.supabase_url = os.getenv("XHS_SUPABASE_URL", "").rstrip("/")
+        self.supabase_service_role_key = os.getenv("XHS_SUPABASE_SERVICE_ROLE_KEY", "")
+        self.supabase_storage_bucket = os.getenv("XHS_SUPABASE_STORAGE_BUCKET", "xhs-assets")
+        self.supabase_ssl_verify = os.getenv("XHS_SUPABASE_SSL_VERIFY", "true").lower() not in {
+            "0",
+            "false",
+            "no",
+            "off",
+        }
+        self.supabase_seed_sample = os.getenv("XHS_SUPABASE_SEED_SAMPLE", "false").lower() in {
+            "1",
+            "true",
+            "yes",
+            "on",
+        }
+
     def provider_status(self):
         return {
             "text": {
@@ -140,6 +181,14 @@ class Settings:
                 "provider": self.video_provider,
                 "api_base": self.video_api_base,
                 "model": self.video_model,
+            },
+            "database": {
+                "configured": self.storage_backend == "supabase"
+                and bool(self.supabase_url and self.supabase_service_role_key),
+                "provider": self.storage_backend,
+                "supabase_url": self.supabase_url,
+                "storage_bucket": self.supabase_storage_bucket,
+                "ssl_verify": self.supabase_ssl_verify,
             },
         }
 

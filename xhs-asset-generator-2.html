@@ -714,8 +714,9 @@ async function syncWithBackend(){
   try{
     const health=await apiRequest('/health');
     const provider=await apiRequest('/provider-status');
+    const database=await apiRequest('/database-status').catch(()=>({database:{backend:'unknown'}}));
     const ready=Object.entries(provider.providers||{}).filter(([,v])=>v.configured).map(([k])=>k).join('、')||'未配置真实接口';
-    showToast(`后端连接正常：${health.version||'ok'} · ${ready}`,'success');
+    showToast(`后端连接正常：${health.version||'ok'} · ${ready} · 数据库：${database.database?.backend||'unknown'}`,'success');
   }catch(err){
     showToast('后端未启动，当前只显示示例数据；生成会提示失败','warn');
   }

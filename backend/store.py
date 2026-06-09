@@ -85,6 +85,14 @@ class InMemoryStore:
             }
         )
 
+    def status(self):
+        return {
+            "backend": "memory",
+            "configured": False,
+            "product_count": len(self.products),
+            "asset_count": len(self.assets),
+        }
+
     def _clone(self, value):
         return deepcopy(value)
 

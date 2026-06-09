@@ -18,6 +18,7 @@ curl http://127.0.0.1:8787/api/health
 
 - `GET /api/health`
 - `GET /api/provider-status`
+- `GET /api/database-status`
 - `GET /api/products`
 - `POST /api/products`
 - `GET /api/products/{id}`
@@ -176,6 +177,64 @@ curl -X POST http://127.0.0.1:8787/api/providers/image/result \
 - 生成任务编排：`backend/services/mock_generation.py`
 
 生视频接口暂时留空，等 provider/API key 确定后再加。
+
+## Supabase 数据库 / Storage
+
+这一版支持两种存储模式：
+
+- `memory`：默认模式，数据存在本地后端内存里，重启后丢失。
+- `supabase`：产品、款式、素材、任务、笔记包写入 Supabase；上传的 data URL 图片会自动上传到 Supabase Storage。
+
+### 1. 建表
+
+在 Supabase 控制台打开 SQL Editor，执行：
+
+```sql
+-- 文件位置：backend/supabase_schema.sql
+```
+
+这份 SQL 会创建：
+
+- `products`
+- `assets`
+- `note_packages`
+- `generation_jobs`
+- `uploads`
+- `template_prompts`
+- `xhs-assets` Storage bucket
+
+### 2. 配置本地环境变量
+
+复制模板：
+
+```bash
+cp .env.example .env.local
+```
+
+然后填写：
+
+```bash
+XHS_STORAGE_BACKEND=supabase
+XHS_SUPABASE_URL=https://你的项目.supabase.co
+XHS_SUPABASE_SERVICE_ROLE_KEY=你的 service_role key
+XHS_SUPABASE_STORAGE_BUCKET=xhs-assets
+```
+
+`service_role key` 只能放在后端本地或部署环境变量里，不能写进前端 HTML，也不能提交到 GitHub。
+
+### 3. 重启后端
+
+```bash
+python3 backend/server.py --host 127.0.0.1 --port 8787
+```
+
+检查数据库状态：
+
+```bash
+curl http://127.0.0.1:8787/api/database-status
+```
+
+如果返回 `backend: "supabase"`，说明后端已经切到 Supabase。
 
 ## 前端生成链路
 

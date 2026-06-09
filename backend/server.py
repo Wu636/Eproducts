@@ -16,9 +16,16 @@ from services.image_provider import build_image_request_debug, create_image_task
 from services.mock_generation import run_generation_job
 from services.text_provider import generate_copywriting
 from store import InMemoryStore
+from supabase_store import SupabaseStore
 
 
-store = InMemoryStore()
+def create_store():
+    if settings.storage_backend == "supabase":
+        return SupabaseStore(settings)
+    return InMemoryStore()
+
+
+store = create_store()
 
 
 class ApiError(Exception):
@@ -76,6 +83,9 @@ class RequestHandler(BaseHTTPRequestHandler):
 
         if method == "GET" and path == "/api/provider-status":
             return {"providers": settings.provider_status()}
+
+        if method == "GET" and path == "/api/database-status":
+            return {"database": store.status()}
 
         if resource == "providers":
             return self._providers(method, parts, body)
