@@ -716,9 +716,29 @@ async function syncWithBackend(){
     const provider=await apiRequest('/provider-status');
     const database=await apiRequest('/database-status').catch(()=>({database:{backend:'unknown'}}));
     const ready=Object.entries(provider.providers||{}).filter(([,v])=>v.configured).map(([k])=>k).join('、')||'未配置真实接口';
-    showToast(`后端连接正常：${health.version||'ok'} · ${ready} · 数据库：${database.database?.backend||'unknown'}`,'success');
+    showToast(`正在同步到 ${database.database?.backend||'后端'}…`,'info');
+    const currentId=currentProduct&&currentProduct.id;
+    let pushedProducts=0,pushedAssets=0,pushedNotes=0;
+    for(const p of products){await ensureBackendProduct(p);pushedProducts++;}
+    for(const a of allAssets){await apiRequest('/assets',{method:'POST',body:toBackendAsset(a)});pushedAssets++;}
+    for(const n of notePackages){await apiRequest('/note-packages',{method:'POST',body:toBackendNote(n)});pushedNotes++;}
+    const [productsRes,assetsRes,notesRes]=await Promise.all([
+      apiRequest('/products'),
+      apiRequest('/assets'),
+      apiRequest('/note-packages'),
+    ]);
+    products=(productsRes.items||[]).map(fromBackendProduct);
+    allAssets=(assetsRes.items||[]).map(fromBackendAsset);
+    notePackages=(notesRes.items||[]).map(fromBackendNote);
+    currentProduct=products.find(p=>p.id===currentId)||currentProduct;
+    saveLocalState();
+    if(currentProduct)renderDetail();
+    renderDashboard();
+    if(document.getElementById('page-assets').classList.contains('active'))renderAssetLibrary();
+    if(document.getElementById('page-notes').classList.contains('active'))renderNotePackages();
+    showToast(`同步完成：产品 ${pushedProducts}，素材 ${pushedAssets}，笔记包 ${pushedNotes} · ${ready} · 数据库：${database.database?.backend||'unknown'}`,'success',6500);
   }catch(err){
-    showToast('后端未启动，当前只显示示例数据；生成会提示失败','warn');
+    showToast(`同步失败：${err.message}`,'warn',7000);
   }
 }
 
@@ -820,6 +840,27 @@ function fromBackendAsset(a){
   };
 }
 
+function toBackendAsset(a){
+  return{
+    id:a.id,
+    product_id:a.productId||'',
+    product_name:a.productName||'',
+    type:a.type||'copy',
+    title:a.title||'',
+    status:a.status||'review',
+    style:a.style||'',
+    content:a.content||'',
+    url:a.url||'',
+    provider_task:a.providerTask||{},
+    provider_status:a.providerStatus||'',
+    variant_id:a.variantId||'',
+    variant_name:a.variantName||'',
+    source_image_url:a.sourceImageUrl||'',
+    generation_plan:a.generationPlan||{},
+    created_at:a.createdAt||todayDate(),
+  };
+}
+
 function fromBackendNote(n){
   return{
     id:n.id,
@@ -839,6 +880,28 @@ function fromBackendNote(n){
     publishPlan:n.publish_plan,
     createdAt:n.created_at,
     goal:n.goal,
+  };
+}
+
+function toBackendNote(n){
+  return{
+    id:n.id,
+    product_id:n.productId||'',
+    product_name:n.productName||'',
+    title:n.title||'',
+    angle:n.angle||'',
+    persona:n.persona||'',
+    status:n.status||'review',
+    score:n.score||80,
+    copy_asset_id:n.copyAssetId||'',
+    cover_asset_id:n.coverAssetId||'',
+    detail_asset_ids:n.detailAssetIds||[],
+    video_asset_id:n.videoAssetId||'',
+    summary:n.summary||'',
+    hashtags:n.hashtags||[],
+    publish_plan:n.publishPlan||'待排期',
+    goal:n.goal||'引流成交',
+    created_at:n.createdAt||todayDate(),
   };
 }
 
@@ -2017,6 +2080,10 @@ function syncAssetPatch(a){
       url:a.url||'',
       provider_task:a.providerTask||{},
       provider_status:a.providerStatus||'',
+      variant_id:a.variantId||'',
+      variant_name:a.variantName||'',
+      source_image_url:a.sourceImageUrl||'',
+      generation_plan:a.generationPlan||{},
     },
   }).catch(err=>showToast(`本地已保存，后端同步失败：${err.message}`,'warn',6000));
 }

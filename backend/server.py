@@ -196,6 +196,8 @@ class RequestHandler(BaseHTTPRequestHandler):
                     status=query.get("status"),
                 )
             }
+        if method == "POST" and len(parts) == 2:
+            return {"item": store.create_asset(body)}
         if method == "PATCH" and len(parts) == 3:
             item = store.update_asset(parts[2], body)
             if not item:
@@ -221,6 +223,8 @@ class RequestHandler(BaseHTTPRequestHandler):
                     status=query.get("status"),
                 )
             }
+        if method == "POST" and len(parts) == 2:
+            return {"item": store.create_note_package(body)}
         if method == "PATCH" and len(parts) == 4 and parts[3] == "status":
             item = store.update_note_status(parts[2], body.get("status", "review"))
             if not item:
