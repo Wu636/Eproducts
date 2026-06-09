@@ -1,0 +1,37 @@
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+env/
+
+# Node / frontend tooling
+node_modules/
+dist/
+build/
+.vite/
+
+# Local secrets and provider config
+.env
+.env.*
+!.env.example
+backend/provider_config.local.json
+
+# Local data, cache, logs, generated artifacts
+*.log
+*.sqlite
+*.sqlite3
+*.db
+*.artifact.json
+uploads/
+generated/
+tmp/

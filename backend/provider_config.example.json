@@ -1,0 +1,28 @@
+{
+  "text": {
+    "provider": "xiaomi_mimo",
+    "api_base": "https://token-plan-cn.xiaomimimo.com/v1",
+    "api_key": "在这里填小米 MiMo 的 API Key，不要提交到仓库",
+    "model": "mimo-v2.5",
+    "api_key_header": "Authorization",
+    "api_key_prefix": "Bearer ",
+    "ssl_verify": true
+  },
+  "image": {
+    "provider": "grsai_gpt_image",
+    "api_base": "https://grsai.dakka.com.cn",
+    "api_key": "在这里填 Grsai 的 API Key，不要提交到仓库",
+    "model": "gpt-image-2",
+    "create_path": "/v1/draw/completions",
+    "result_path": "/v1/draw/result",
+    "api_key_header": "Authorization",
+    "api_key_prefix": "Bearer ",
+    "ssl_verify": true
+  },
+  "video": {
+    "provider": "",
+    "api_base": "",
+    "api_key": "",
+    "model": ""
+  }
+}
