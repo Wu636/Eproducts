@@ -152,17 +152,19 @@ class InMemoryStore:
 
     def create_asset(self, data):
         with self._lock:
+            asset_id = data.get("id") or make_id("asset")
+            current = self.assets.get(asset_id, {})
             item = {
-                "id": data.get("id") or make_id("asset"),
+                "id": asset_id,
                 "product_id": data.get("product_id", ""),
                 "type": data.get("type", "copy"),
                 "title": data.get("title", ""),
                 "status": data.get("status", "review"),
                 "style": data.get("style", ""),
                 "content": data.get("content", ""),
-                "url": data.get("url", ""),
-                "provider_task": data.get("provider_task", {}),
-                "provider_status": data.get("provider_status", ""),
+                "url": data.get("url") or current.get("url", ""),
+                "provider_task": data.get("provider_task") or current.get("provider_task", {}),
+                "provider_status": data.get("provider_status") or current.get("provider_status", ""),
                 "variant_id": data.get("variant_id", ""),
                 "variant_name": data.get("variant_name", ""),
                 "source_image_url": data.get("source_image_url", ""),

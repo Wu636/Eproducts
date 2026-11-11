@@ -43,31 +43,45 @@ def _reference_debug(reference_images):
     }
 
 
-def _build_image_payload(prompt, aspect_ratio="auto", images=None, extra=None):
+def _build_image_payload(prompt, aspect_ratio="auto", images=None, extra=None, model=None):
     reference_images = _normalize_reference_images(images)
     aspect_ratio = aspect_ratio or "auto"
+    image_model = model or settings.image_model
+    create_path = settings.image_create_path_for(image_model)
+    model_profile = settings.image_model_profile(image_model)
 
-    if "/v1/images/generations" in settings.image_create_path:
+    if "/v1/images/generations" in create_path:
         payload = {
-            "model": settings.image_model,
+            "model": image_model,
             "prompt": prompt,
             "size": aspect_ratio,
             "response_format": "url",
         }
         if reference_images:
             payload["image"] = reference_images
-    elif "/v1/api/generate" in settings.image_create_path:
+    elif "/v1/api/generate" in create_path:
         payload = {
-            "model": settings.image_model,
+            "model": image_model,
             "prompt": prompt,
             "aspectRatio": aspect_ratio,
             "replyType": "json",
         }
         if reference_images:
             payload["images"] = reference_images
+    elif "/v1/draw/nano-banana" in create_path:
+        payload = {
+            "model": image_model,
+            "prompt": prompt,
+            "aspectRatio": aspect_ratio,
+            "imageSize": model_profile.get("image_size") or "1K",
+            "webHook": "-1",
+            "shutProgress": False,
+        }
+        if reference_images:
+            payload["urls"] = reference_images
     else:
         payload = {
-            "model": settings.image_model,
+            "model": image_model,
             "prompt": prompt,
             "aspectRatio": aspect_ratio,
             "shutProgress": False,
@@ -81,40 +95,55 @@ def _build_image_payload(prompt, aspect_ratio="auto", images=None, extra=None):
     return payload
 
 
-def build_image_request_debug(prompt, size="auto", images=None, extra=None, aspect_ratio=None):
+def build_image_request_debug(prompt, size="auto", images=None, extra=None, aspect_ratio=None, model=None):
     reference_images = _normalize_reference_images(images)
-    payload = _build_image_payload(prompt, aspect_ratio=aspect_ratio or size or "auto", images=images, extra=extra)
+    payload = _build_image_payload(
+        prompt,
+        aspect_ratio=aspect_ratio or size or "auto",
+        images=images,
+        extra=extra,
+        model=model,
+    )
     redacted = {
         key: ("[reference images omitted]" if key in {"urls", "images", "image"} else value)
         for key, value in payload.items()
     }
     return {
-        "endpoint": _url(settings.image_create_path),
+        "endpoint": _url(settings.image_create_path_for(model)),
         "payload": redacted,
         **_reference_debug(reference_images),
     }
 
 
-def create_image_task(prompt, size="auto", images=None, extra=None, aspect_ratio=None):
-    """Submit a Grsai GPT Image generation request.
+def create_image_task(prompt, size="auto", images=None, extra=None, aspect_ratio=None, model=None):
+    """Submit a Grsai image task through the model-specific legacy endpoint.
 
-    The current Grsai page shows:
-    - Host: https://grsai.dakka.com.cn
-    - Create: POST /v1/draw/completions
-    - Result: POST /v1/draw/result
-
-    The exact provider response is preserved in `raw` so we can adapt fields
-    after you confirm the final API docs/key format.
+    GPT Image models use /v1/draw/completions; Nano Banana models use
+    /v1/draw/nano-banana. Both families are polled through /v1/draw/result
+    and preserve the provider response in raw.
     """
 
     if not is_image_provider_configured():
         raise ProviderNotConfigured("Image provider is not configured")
 
-    payload = _build_image_payload(prompt, aspect_ratio=aspect_ratio or size or "auto", images=images, extra=extra)
-    request_debug = build_image_request_debug(prompt, size=size, images=images, extra=extra, aspect_ratio=aspect_ratio)
+    payload = _build_image_payload(
+        prompt,
+        aspect_ratio=aspect_ratio or size or "auto",
+        images=images,
+        extra=extra,
+        model=model,
+    )
+    request_debug = build_image_request_debug(
+        prompt,
+        size=size,
+        images=images,
+        extra=extra,
+        aspect_ratio=aspect_ratio,
+        model=model,
+    )
 
     data = post_json(
-        _url(settings.image_create_path),
+        _url(settings.image_create_path_for(model)),
         payload,
         _headers(),
         timeout=300,
@@ -143,7 +172,7 @@ def get_image_result(task_id, extra=None):
     return normalize_image_response(data)
 
 
-def wait_for_image_result(initial_result, poll_interval=4, max_wait=180):
+def wait_for_image_result(initial_result, poll_interval=None, max_wait=None, on_poll=None):
     """Poll Grsai result API until a generated image URL is available."""
 
     result = dict(initial_result or {})
@@ -154,18 +183,32 @@ def wait_for_image_result(initial_result, poll_interval=4, max_wait=180):
     if not task_id:
         return result
 
+    poll_interval = max(2, int(poll_interval or settings.image_poll_interval or 5))
+    max_wait = max(60, int(max_wait or settings.image_max_wait or 2400))
+    started_at = monotonic()
     deadline = monotonic() + max_wait
     last_error = ""
     while monotonic() < deadline:
         sleep(poll_interval)
+        elapsed_seconds = int(monotonic() - started_at)
         try:
             latest = get_image_result(task_id)
         except Exception as exc:
             last_error = str(exc)
             result["last_poll_error"] = last_error
+            if on_poll:
+                try:
+                    on_poll({**result, "elapsed_seconds": elapsed_seconds, "max_wait": max_wait})
+                except Exception:
+                    pass
             continue
         latest["task_id"] = latest.get("task_id") or task_id
         result = {**result, **latest}
+        if on_poll:
+            try:
+                on_poll({**result, "elapsed_seconds": elapsed_seconds, "max_wait": max_wait})
+            except Exception:
+                pass
         if result.get("url"):
             return result
         status = (result.get("status") or "").lower()
@@ -174,6 +217,8 @@ def wait_for_image_result(initial_result, poll_interval=4, max_wait=180):
 
     if not result.get("url") and (result.get("status") or "").lower() not in {"failed", "error", "canceled", "cancelled"}:
         result["status"] = "timeout"
+        result["elapsed_seconds"] = int(monotonic() - started_at)
+        result["timeout_after_seconds"] = max_wait
         if last_error:
             result["last_poll_error"] = last_error
     return result

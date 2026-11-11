@@ -2,12 +2,16 @@ from __future__ import annotations
 
 import base64
 import json
+import mimetypes
 import re
 import ssl
 from copy import deepcopy
+from pathlib import Path
 from urllib import error, parse, request
 
 from store import InMemoryStore, make_id, today
+
+WORKSPACE_ROOT = Path(__file__).resolve().parents[1]
 
 
 def _split_text_list(value):
@@ -224,6 +228,55 @@ class SupabaseStore:
         path = f"{folder}/{today()}/{make_id('file')}-{filename}"
         return self._upload_binary(path, content_type, raw)
 
+    def _is_own_storage_url(self, value):
+        if not isinstance(value, str):
+            return False
+        prefix = f"{self.url}/storage/v1/object/public/{parse.quote(self.bucket, safe='')}/"
+        return value.startswith(prefix)
+
+    def _store_asset_url_if_needed(self, value, filename_hint="asset"):
+        decoded = _decode_data_url(value)
+        if decoded:
+            content_type, raw = decoded
+        else:
+            if not isinstance(value, str):
+                return value or ""
+            if not value.startswith(("http://", "https://")):
+                path = Path(value)
+                if not path.is_absolute():
+                    path = WORKSPACE_ROOT / value.lstrip("/")
+                try:
+                    path = path.resolve()
+                    path.relative_to(WORKSPACE_ROOT.resolve())
+                except ValueError:
+                    return value or ""
+                if not path.exists() or not path.is_file():
+                    return value or ""
+                content_type = mimetypes.guess_type(str(path))[0] or "application/octet-stream"
+                if not content_type.startswith("image/"):
+                    return value or ""
+                raw = path.read_bytes()
+            elif self._is_own_storage_url(value):
+                return value
+            else:
+                if not re.search(r"\.(png|jpe?g|webp)(\?|#|$)", value, re.I):
+                    return value
+                req = request.Request(value, headers={"User-Agent": "Mozilla/5.0"})
+                try:
+                    with request.urlopen(req, timeout=90, context=self._context()) as response:
+                        content_type = response.headers.get("Content-Type", "application/octet-stream").split(";")[0]
+                        raw = response.read()
+                except Exception:
+                    return value
+                if not content_type.startswith("image/"):
+                    return value
+
+        filename = _safe_filename(filename_hint, "asset")
+        if "." not in filename:
+            filename += _extension_for_content_type(content_type)
+        path = f"assets/{today()}/{make_id('file')}-{filename}"
+        return self._upload_binary(path, content_type, raw)
+
     def _store_product_images(self, item):
         item["image_url"] = self._store_data_url_if_needed(item.get("image_url", ""), "products", f"{item['id']}-main")
         for variant in item.get("variants", []):
@@ -271,9 +324,16 @@ class SupabaseStore:
         return self._list("products", {"select": "*", "order": "updated_at.desc"})
 
     def create_asset(self, data):
+        asset_id = data.get("id") or make_id("asset")
+        current = self._get("assets", asset_id)
         product = self.get_product(data.get("product_id", "")) if data.get("product_id") else None
+        incoming_url = data.get("url", "")
+        if not incoming_url and current:
+            incoming_url = current.get("url", "")
+        provider_task = data.get("provider_task") or (current.get("provider_task") if current else {})
+        provider_status = data.get("provider_status") or (current.get("provider_status") if current else "")
         item = {
-            "id": data.get("id") or make_id("asset"),
+            "id": asset_id,
             "product_id": data.get("product_id", ""),
             "product_name": product["name"] if product else data.get("product_name", ""),
             "type": data.get("type", "copy"),
@@ -281,9 +341,9 @@ class SupabaseStore:
             "status": data.get("status", "review"),
             "style": data.get("style", ""),
             "content": data.get("content", ""),
-            "url": self._store_data_url_if_needed(data.get("url", ""), "assets", data.get("title") or "asset"),
-            "provider_task": data.get("provider_task", {}),
-            "provider_status": data.get("provider_status", ""),
+            "url": self._store_asset_url_if_needed(incoming_url, data.get("title") or asset_id),
+            "provider_task": provider_task,
+            "provider_status": provider_status,
             "variant_id": data.get("variant_id", ""),
             "variant_name": data.get("variant_name", ""),
             "source_image_url": data.get("source_image_url", ""),
@@ -321,7 +381,7 @@ class SupabaseStore:
         }
         patch = {key: value for key, value in data.items() if key in allowed}
         if "url" in patch:
-            patch["url"] = self._store_data_url_if_needed(patch["url"], "assets", asset_id)
+            patch["url"] = self._store_asset_url_if_needed(patch["url"], asset_id)
         return self._patch("assets", asset_id, patch)
 
     def delete_asset(self, asset_id):

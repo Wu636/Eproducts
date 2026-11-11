@@ -66,6 +66,9 @@ def _provider_copy(product, angle, persona, goal, word_range="", rewrite_suggest
         return generate_copywriting(product, angle, persona, goal=goal, word_range=word_range, rewrite_suggestion=rewrite_suggestion, template_prompt=template_prompt), "real"
     except ProviderNotConfigured:
         return _copy(product, angle, persona, word_range=word_range, rewrite_suggestion=rewrite_suggestion, template_prompt=template_prompt), "mock"
+    except Exception as exc:
+        status = f"fallback_error:{type(exc).__name__}"
+        return _copy(product, angle, persona, word_range=word_range, rewrite_suggestion=rewrite_suggestion, template_prompt=template_prompt), status
 
 
 def _title(product, angle, index):
@@ -94,6 +97,71 @@ def _ratio_text(aspect_ratio, asset_type):
     return "3:4 小红书竖版封面" if asset_type == "cover" else "小红书产品细节图"
 
 
+def _truthy(value):
+    if isinstance(value, bool):
+        return value
+    return str(value or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _looks_like_image_url(value):
+    if not isinstance(value, str):
+        return False
+    if value.startswith("data:image/"):
+        return True
+    return value.startswith(("http://", "https://")) or value.startswith("/")
+
+
+def _first_image_url(value, depth=0):
+    if not value or depth > 5:
+        return ""
+    if isinstance(value, str):
+        return value if _looks_like_image_url(value) else ""
+    if isinstance(value, list):
+        for item in value:
+            found = _first_image_url(item, depth + 1)
+            if found:
+                return found
+        return ""
+    if not isinstance(value, dict):
+        return ""
+    for key in ("url", "image_url", "imageUrl", "output_url", "outputUrl"):
+        if _looks_like_image_url(value.get(key)):
+            return value[key]
+    for key in ("provider_task", "providerTask", "raw", "results", "result", "data", "images", "outputs"):
+        found = _first_image_url(value.get(key), depth + 1)
+        if found:
+            return found
+    return ""
+
+
+def _asset_image_url(asset):
+    if not asset:
+        return ""
+    return asset.get("url") or _first_image_url(asset.get("provider_task")) or _first_image_url(asset.get("providerTask"))
+
+
+def _source_asset_url(store, asset_id, product_id=""):
+    if not asset_id:
+        return ""
+    candidates = []
+    try:
+        candidates.extend(store.list_assets(product_id=product_id) if product_id else [])
+    except Exception:
+        pass
+    try:
+        candidates.extend(store.list_assets())
+    except Exception:
+        pass
+    seen = set()
+    for asset in candidates:
+        if not asset or asset.get("id") in seen:
+            continue
+        seen.add(asset.get("id"))
+        if asset.get("id") == asset_id:
+            return _asset_image_url(asset)
+    return ""
+
+
 def _image_prompt(product, asset_type, angle, index, aspect_ratio="", rewrite_suggestion="", template_prompt="", image_advice="", plan_item=None):
     ratio = _ratio_text(aspect_ratio, asset_type)
     plan_item = plan_item or {}
@@ -104,10 +172,18 @@ def _image_prompt(product, asset_type, angle, index, aspect_ratio="", rewrite_su
         "只允许优化光线、背景、构图、留白和小红书电商氛围。"
     )
     plan_text = plan_item.get("prompt") or ""
+    reference_edit_rule = ""
+    if _truthy(plan_item.get("referenceEditMode") or plan_item.get("reference_edit_mode")):
+        reference_edit_rule = (
+            "第一张参考图是上一版已生成图，本次任务是基于这张图做局部重生。"
+            "优先保留上一版图里的商品主体、比例、材质、包装文字/服饰细节、构图关系和可用部分，"
+            "只根据用户修改建议调整背景、光线、道具、留白、姿势或局部瑕疵；不要无关大改。"
+        )
     return (
         f"{ratio}，产品：{product.get('name')}，类目：{product.get('category')}，"
         f"内容角度：{angle}，核心卖点：{'、'.join(_points(product)[:4])}。"
         f"{subject_rule}"
+        f"{reference_edit_rule}"
         f"{'模板提示词：' + template_prompt + '。' if template_prompt else ''}"
         f"{'用户生图建议：' + image_advice + '。' if image_advice else ''}"
         f"{'本张审核通过的生图方案：' + plan_text + '。' if plan_text else ''}"
@@ -116,22 +192,28 @@ def _image_prompt(product, asset_type, angle, index, aspect_ratio="", rewrite_su
     )
 
 
-def _reference_images(product, variant_id=""):
+def _reference_images(product, variant_id="", source_reference_url=""):
     variant = _selected_variant(product, variant_id)
     image_url = variant.get("image_url") or variant.get("imageUrl") or product.get("image_url") or product.get("imageUrl") or ""
-    return [image_url] if image_url else None
+    refs = []
+    for url in (source_reference_url, image_url):
+        if url and url not in refs:
+            refs.append(url)
+    return refs or None
 
 
-def _provider_image_task(product, asset_type, angle, index, size="auto", aspect_ratio="", rewrite_suggestion="", template_prompt="", image_advice="", plan_item=None):
+def _provider_image_task(product, asset_type, angle, index, size="auto", aspect_ratio="", rewrite_suggestion="", template_prompt="", image_advice="", plan_item=None, image_model=""):
     plan_item = plan_item or {}
     variant_id = plan_item.get("variantId") or plan_item.get("variant_id") or product.get("selected_variant_id", "")
+    source_reference_url = plan_item.get("sourceImageUrl") or plan_item.get("source_image_url") or plan_item.get("source_reference_url") or ""
     prompt = _image_prompt(product, asset_type, angle, index, aspect_ratio=aspect_ratio, rewrite_suggestion=rewrite_suggestion, template_prompt=template_prompt, image_advice=image_advice, plan_item=plan_item)
     try:
         result = create_image_task(
             prompt=prompt,
             size=size or "auto",
             aspect_ratio=aspect_ratio or size or "auto",
-            images=_reference_images(product, variant_id),
+            images=_reference_images(product, variant_id, source_reference_url=source_reference_url),
+            model=image_model or None,
         )
         result = wait_for_image_result(result, max_wait=300)
         status = result.get("status") or ("succeeded" if result.get("url") else "submitted")
@@ -163,7 +245,10 @@ def run_generation_job(store, job_id):
     try:
         _run_generation_job(store, job_id)
     except Exception as exc:
-        store.update_job(job_id, status="failed", progress=100, detail=f"真实接口调用失败：{exc}")
+        try:
+            store.update_job(job_id, status="failed", progress=100, detail=f"真实接口调用失败：{exc}")
+        except Exception:
+            pass
 
 
 def _run_generation_job(store, job_id):
@@ -191,9 +276,16 @@ def _run_generation_job(store, job_id):
     template_prompt = config.get("template_prompt") or ""
     image_advice = config.get("image_advice") or ""
     plan_items = config.get("plan_items") or []
+    image_model = config.get("image_model") or config.get("imageModel") or ""
+    image_model_profile = config.get("image_model_profile") or config.get("imageModelProfile") or {}
+    source_asset_id = config.get("source_asset_id") or config.get("sourceAssetId") or ""
+    source_image_url = config.get("source_image_url") or config.get("sourceImageUrl") or ""
+    use_source_image_reference = _truthy(config.get("use_source_image_reference") or config.get("useSourceImageReference") or config.get("reference_edit_mode") or config.get("referenceEditMode"))
     variant_id = config.get("variant_id") or product.get("selected_variant_id", "")
     variant = _selected_variant(product, variant_id)
     product_for_text = _product_for_variant(product, variant.get("id", ""))
+    if use_source_image_reference and not source_image_url:
+        source_image_url = _source_asset_url(store, source_asset_id, product.get("id", ""))
 
     steps = [
         "分析产品资料",
@@ -212,10 +304,22 @@ def _run_generation_job(store, job_id):
     cover_ids = []
     detail_ids = []
     video_ids = []
+    needs_copy_content = "copy" in asset_types or mode == "all"
 
     for i in range(count):
         angle = angles[i % len(angles)]
-        copy_content, copy_provider_status = _provider_copy(product_for_text, angle, persona, goal, word_range=word_range, rewrite_suggestion=rewrite_suggestion, template_prompt=template_prompt)
+        copy_content = ""
+        copy_provider_status = ""
+        if needs_copy_content:
+            copy_content, copy_provider_status = _provider_copy(
+                product_for_text,
+                angle,
+                persona,
+                goal,
+                word_range=word_range,
+                rewrite_suggestion=rewrite_suggestion,
+                template_prompt=template_prompt,
+            )
         if "copy" in asset_types:
             asset = store.create_asset(
                 {
@@ -237,7 +341,18 @@ def _run_generation_job(store, job_id):
             plan_item = plan_items[i % len(plan_items)] if plan_items else {}
             plan_variant = _selected_variant(product, plan_item.get("variantId") or plan_item.get("variant_id") or variant.get("id", ""))
             image_product = _product_for_variant(product, plan_variant.get("id", ""))
-            image_task = _provider_image_task(image_product, "cover", angle, i, size=image_size, aspect_ratio=aspect_ratio, rewrite_suggestion=rewrite_suggestion, template_prompt=template_prompt, image_advice=image_advice, plan_item=plan_item)
+            plan_source_url = plan_item.get("sourceImageUrl") or plan_item.get("source_image_url") or source_image_url
+            plan_reference_edit = _truthy(plan_item.get("referenceEditMode") or plan_item.get("reference_edit_mode")) or bool(plan_source_url and use_source_image_reference)
+            plan_with_model = {
+                **plan_item,
+                "image_model": image_model,
+                "image_model_profile": image_model_profile,
+                "source_asset_id": plan_item.get("sourceAssetId") or plan_item.get("source_asset_id") or source_asset_id,
+                "source_image_url": plan_source_url,
+                "source_reference_url": plan_source_url,
+                "reference_edit_mode": plan_reference_edit,
+            }
+            image_task = _provider_image_task(image_product, "cover", angle, i, size=image_size, aspect_ratio=aspect_ratio, rewrite_suggestion=rewrite_suggestion, template_prompt=template_prompt, image_advice=image_advice, plan_item=plan_with_model, image_model=image_model)
             asset = store.create_asset(
                 {
                     "product_id": product["id"],
@@ -248,7 +363,7 @@ def _run_generation_job(store, job_id):
                     "variant_id": plan_variant.get("id", ""),
                     "variant_name": plan_variant.get("name", ""),
                     "source_image_url": plan_variant.get("image_url", ""),
-                    "generation_plan": plan_item,
+                    "generation_plan": plan_with_model,
                     **image_task,
                 }
             )
@@ -259,7 +374,18 @@ def _run_generation_job(store, job_id):
             plan_item = plan_items[i % len(plan_items)] if plan_items else {}
             plan_variant = _selected_variant(product, plan_item.get("variantId") or plan_item.get("variant_id") or variant.get("id", ""))
             image_product = _product_for_variant(product, plan_variant.get("id", ""))
-            image_task = _provider_image_task(image_product, "detailimg", angle, i, size=image_size, aspect_ratio=aspect_ratio, rewrite_suggestion=rewrite_suggestion, template_prompt=template_prompt, image_advice=image_advice, plan_item=plan_item)
+            plan_source_url = plan_item.get("sourceImageUrl") or plan_item.get("source_image_url") or source_image_url
+            plan_reference_edit = _truthy(plan_item.get("referenceEditMode") or plan_item.get("reference_edit_mode")) or bool(plan_source_url and use_source_image_reference)
+            plan_with_model = {
+                **plan_item,
+                "image_model": image_model,
+                "image_model_profile": image_model_profile,
+                "source_asset_id": plan_item.get("sourceAssetId") or plan_item.get("source_asset_id") or source_asset_id,
+                "source_image_url": plan_source_url,
+                "source_reference_url": plan_source_url,
+                "reference_edit_mode": plan_reference_edit,
+            }
+            image_task = _provider_image_task(image_product, "detailimg", angle, i, size=image_size, aspect_ratio=aspect_ratio, rewrite_suggestion=rewrite_suggestion, template_prompt=template_prompt, image_advice=image_advice, plan_item=plan_with_model, image_model=image_model)
             asset = store.create_asset(
                 {
                     "product_id": product["id"],
@@ -270,7 +396,7 @@ def _run_generation_job(store, job_id):
                     "variant_id": plan_variant.get("id", ""),
                     "variant_name": plan_variant.get("name", ""),
                     "source_image_url": plan_variant.get("image_url", ""),
-                    "generation_plan": plan_item,
+                    "generation_plan": plan_with_model,
                     **image_task,
                 }
             )
@@ -313,7 +439,7 @@ def _run_generation_job(store, job_id):
                     "cover_asset_id": cover_ids[-1] if cover_ids else "",
                     "detail_asset_ids": detail_ids[-1:] if detail_ids else [],
                     "video_asset_id": video_ids[-1] if video_ids else "",
-                    "summary": copy_content[:160],
+                    "summary": (copy_content or f"{product['name']} · {angle}素材包")[:160],
                     "hashtags": [f"#{product.get('category') or '好物'}", f"#{product['name']}", "#小红书种草"],
                     "publish_plan": "待排期",
                     "goal": goal,

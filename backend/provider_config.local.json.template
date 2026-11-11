@@ -1,9 +1,13 @@
 {
   "text": {
-    "provider": "xiaomi_mimo",
-    "api_base": "https://token-plan-cn.xiaomimimo.com/v1",
+    "provider": "yunwu",
+    "yunwu_api_key": "",
+    "mimo_api_key": "",
+    "deepseek_api_key": "",
+    "api_base": "https://yunwu.ai/v1",
     "api_key": "",
-    "model": "mimo-v2.5",
+    "model": "claude-sonnet-4-6",
+    "vision_model": "gemini-3.5-flash",
     "api_key_header": "Authorization",
     "api_key_prefix": "Bearer ",
     "ssl_verify": true
@@ -13,6 +17,14 @@
     "api_base": "https://grsai.dakka.com.cn",
     "api_key": "",
     "model": "gpt-image-2",
+    "models": [
+      {
+        "id": "gpt-image-2",
+        "label": "Grsai · GPT Image 2",
+        "credits_per_image": 600,
+        "note": "参考图一致性优先；如 Grsai 控制台价格变化，请以控制台为准"
+      }
+    ],
     "create_path": "/v1/draw/completions",
     "result_path": "/v1/draw/result",
     "api_key_header": "Authorization",
@@ -20,9 +32,13 @@
     "ssl_verify": true
   },
   "video": {
-    "provider": "",
-    "api_base": "",
+    "provider": "aliyun_dashscope_animate_anyone",
+    "api_base": "https://dashscope.aliyuncs.com/api/v1",
     "api_key": "",
-    "model": ""
+    "model": "animate-anyone-gen2",
+    "detect_model": "animate-anyone-detect-gen2",
+    "template_model": "animate-anyone-template-gen2",
+    "motion_model": "wan2.2-animate-move",
+    "ssl_verify": true
   }
 }

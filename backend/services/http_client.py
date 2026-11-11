@@ -2,7 +2,20 @@ from __future__ import annotations
 
 import json
 import ssl
-from urllib import request
+from time import sleep
+from urllib import error, request
+
+
+_RETRY_TOKENS = (
+    "unexpected_eof",
+    "eof occurred",
+    "eof while reading",
+    "connection reset",
+    "remote end closed",
+    "timed out",
+    "timeout",
+    "temporarily unavailable",
+)
 
 
 def _parse_response_text(text, status=None, content_type=""):
@@ -61,13 +74,47 @@ def _parse_response_text(text, status=None, content_type=""):
     }
 
 
+def _is_retryable(exc):
+    if isinstance(exc, error.HTTPError):
+        return False
+    if isinstance(exc, (error.URLError, ssl.SSLError, TimeoutError, ConnectionResetError)):
+        return True
+    text = str(exc).lower()
+    return any(token in text for token in _RETRY_TOKENS)
+
+
+def _request_headers(headers):
+    merged = {
+        "Accept": "application/json",
+        "Connection": "close",
+        "User-Agent": "Mozilla/5.0",
+    }
+    merged.update(headers or {})
+    return merged
+
+
 def post_json(url, payload, headers, timeout=300, ssl_verify=True):
     data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
-    req = request.Request(url, data=data, headers=headers, method="POST")
-    context = None
-    if not ssl_verify:
-        context = ssl._create_unverified_context()
-    with request.urlopen(req, timeout=timeout, context=context) as response:
-        content_type = response.headers.get("Content-Type", "")
-        text = response.read().decode("utf-8", errors="replace")
-        return _parse_response_text(text, status=response.status, content_type=content_type)
+    merged_headers = _request_headers(headers)
+    attempts = [ssl_verify, ssl_verify]
+    if ssl_verify:
+        attempts.append(False)
+    last_exc = None
+    for index, verify in enumerate(attempts):
+        req = request.Request(url, data=data, headers=merged_headers, method="POST")
+        context = None if verify else ssl._create_unverified_context()
+        try:
+            with request.urlopen(req, timeout=timeout, context=context) as response:
+                content_type = response.headers.get("Content-Type", "")
+                text = response.read().decode("utf-8", errors="replace")
+                return _parse_response_text(text, status=response.status, content_type=content_type)
+        except error.HTTPError:
+            raise
+        except Exception as exc:
+            last_exc = exc
+            if index >= len(attempts) - 1 or not _is_retryable(exc):
+                raise
+            sleep(0.35 * (index + 1))
+    if last_exc:
+        raise last_exc
+    raise RuntimeError("Request failed without response")

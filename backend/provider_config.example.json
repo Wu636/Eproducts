@@ -1,9 +1,13 @@
 {
   "text": {
-    "provider": "xiaomi_mimo",
-    "api_base": "https://token-plan-cn.xiaomimimo.com/v1",
-    "api_key": "在这里填小米 MiMo 的 API Key，不要提交到仓库",
-    "model": "mimo-v2.5",
+    "provider": "yunwu",
+    "yunwu_api_key": "在这里填云雾 API 令牌，不要提交到仓库",
+    "mimo_api_key": "可选：MiMo API Key",
+    "deepseek_api_key": "可选：DeepSeek API Key",
+    "api_base": "https://yunwu.ai/v1",
+    "api_key": "",
+    "model": "claude-sonnet-4-6",
+    "vision_model": "gemini-3.5-flash",
     "api_key_header": "Authorization",
     "api_key_prefix": "Bearer ",
     "ssl_verify": true
@@ -13,6 +17,20 @@
     "api_base": "https://grsai.dakka.com.cn",
     "api_key": "在这里填 Grsai 的 API Key，不要提交到仓库",
     "model": "gpt-image-2",
+    "models": [
+      {
+        "id": "gpt-image-2",
+        "label": "Grsai · GPT Image 2",
+        "credits_per_image": 600,
+        "note": "参考图一致性优先；如 Grsai 控制台价格变化，请以控制台为准"
+      },
+      {
+        "id": "你在 Grsai 控制台看到的其它模型 ID",
+        "label": "自定义 Grsai 模型名称",
+        "credits_per_image": 0,
+        "note": "把 0 改成单张扣除积分；未知可写 null"
+      }
+    ],
     "create_path": "/v1/draw/completions",
     "result_path": "/v1/draw/result",
     "api_key_header": "Authorization",
@@ -20,9 +38,13 @@
     "ssl_verify": true
   },
   "video": {
-    "provider": "",
-    "api_base": "",
-    "api_key": "",
-    "model": ""
+    "provider": "aliyun_dashscope_animate_anyone",
+    "api_base": "https://dashscope.aliyuncs.com/api/v1",
+    "api_key": "在这里填华北 2（北京）地域的百炼 API Key，不要提交到仓库",
+    "model": "animate-anyone-gen2",
+    "detect_model": "animate-anyone-detect-gen2",
+    "template_model": "animate-anyone-template-gen2",
+    "motion_model": "wan2.2-animate-move",
+    "ssl_verify": true
   }
 }

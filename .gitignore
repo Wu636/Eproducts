@@ -35,3 +35,14 @@ backend/provider_config.local.json
 uploads/
 generated/
 tmp/
+.external/
+
+# Role wallpaper reference library: keep folder structure, never commit local IP/reference images
+reference_library/role_wallpapers/**/*.png
+reference_library/role_wallpapers/**/*.jpg
+reference_library/role_wallpapers/**/*.jpeg
+reference_library/role_wallpapers/**/*.webp
+reference_library/role_wallpapers/**/*.gif
+reference_library/role_wallpapers/**/*.bmp
+!reference_library/role_wallpapers/README.md
+!reference_library/role_wallpapers/**/.gitkeep
